@@ -16,26 +16,26 @@ logger = logging.getLogger(__name__)
 
 PARAMETER_MAX = 10
 
-
+# 自动调整对比度，将最暗(最亮)的点调整至black(white)
 def AutoContrast(img, **kwarg):
     return PIL.ImageOps.autocontrast(img)
 
-
+# 调整图片的亮度，0返回black image，1返回original image
 def Brightness(img, v, max_v, bias=0):
     v = _float_parameter(v, max_v) + bias
     return PIL.ImageEnhance.Brightness(img).enhance(v)
 
-
+# 调整色彩
 def Color(img, v, max_v, bias=0):
     v = _float_parameter(v, max_v) + bias
     return PIL.ImageEnhance.Color(img).enhance(v)
 
-
+# 调整对比度
 def Contrast(img, v, max_v, bias=0):
     v = _float_parameter(v, max_v) + bias
     return PIL.ImageEnhance.Contrast(img).enhance(v)
 
-
+# 将一个随机的L*width区域设为灰色
 def Cutout(img, v, max_v, bias=0):
     if v == 0:
         return img
@@ -59,24 +59,24 @@ def CutoutAbs(img, v, **kwarg):
     PIL.ImageDraw.Draw(img).rectangle(xy, color)
     return img
 
-
+# Equalize the image histogram
 def Equalize(img, **kwarg):
     return PIL.ImageOps.equalize(img)
 
-
+# 返回原图片
 def Identity(img, **kwarg):
     return img
 
-
+# 对图片进行反色处理
 def Invert(img, **kwarg):
     return PIL.ImageOps.invert(img)
 
-
+# 减少每个颜色通道的位数
 def Posterize(img, v, max_v, bias=0):
     v = _int_parameter(v, max_v) + bias
     return PIL.ImageOps.posterize(img, v)
 
-
+# 旋转图片
 def Rotate(img, v, max_v, bias=0):
     v = _int_parameter(v, max_v) + bias
     if random.random() < 0.5:
@@ -102,7 +102,7 @@ def ShearY(img, v, max_v, bias=0):
         v = -v
     return img.transform(img.size, PIL.Image.AFFINE, (1, 0, 0, v, 1, 0))
 
-
+# 对超过阈值的点进行反色
 def Solarize(img, v, max_v, bias=0):
     v = _int_parameter(v, max_v) + bias
     return PIL.ImageOps.solarize(img, 256 - v)
@@ -135,7 +135,10 @@ def TranslateY(img, v, max_v, bias=0):
     v = int(v * img.size[1])
     return img.transform(img.size, PIL.Image.AFFINE, (1, 0, 0, 0, 1, v))
 
+# ShearX、ShearY、TranslateX、TranslateY都属于仿射变换
+# 仿射变换可参见: https://blog.csdn.net/robert_chen1988/article/details/80498805
 
+# 调整幅值，使之落在一个固定的范围内
 def _float_parameter(v, max_v):
     return float(v) * max_v / PARAMETER_MAX
 
@@ -145,21 +148,21 @@ def _int_parameter(v, max_v):
 
 
 def fixmatch_augment_pool():
-    # FixMatch paper
+    # FixMatch paper, 参数与论文附录中RandAugment对应
     augs = [(AutoContrast, None, None),
-            (Brightness, 0.9, 0.05),
-            (Color, 0.9, 0.05),
-            (Contrast, 0.9, 0.05),
+            (Brightness, 0.9, 0.05), # B [0.05,0.95]
+            (Color, 0.9, 0.05), # C [0.05,0.95]
+            (Contrast, 0.9, 0.05), # C [0.05,0.95]
             (Equalize, None, None),
             (Identity, None, None),
-            (Posterize, 4, 4),
-            (Rotate, 30, 0),
-            (Sharpness, 0.9, 0.05),
-            (ShearX, 0.3, 0),
-            (ShearY, 0.3, 0),
-            (Solarize, 256, 0),
-            (TranslateX, 0.3, 0),
-            (TranslateY, 0.3, 0)]
+            (Posterize, 4, 4), # B[4,8]
+            (Rotate, 30, 0), # θ [-30, 30], 有一半几率 v = -v，相当于扩展到对称的负数范围
+            (Sharpness, 0.9, 0.05), # S [0.05,0.95]
+            (ShearX, 0.3, 0), # R [-0.3,0.3]
+            (ShearY, 0.3, 0), # R [-0.3,0.3]
+            (Solarize, 256, 0), # T [0,1]
+            (TranslateX, 0.3, 0), # λ [-0.3,0.3]
+            (TranslateY, 0.3, 0)] # λ [-0.3,0.3]
     return augs
 
 
@@ -202,7 +205,10 @@ class RandAugmentPC(object):
         return img
 
 
+# 相当于fixmatch中的AugmentPoolRAMC
 class RandAugmentMC(object):
+    # n: 采用n种数据增强方法   m：max magnitude
+    # 默认nops=2, magnitude=10
     def __init__(self, n, m):
         assert n >= 1
         assert 1 <= m <= 10
@@ -213,7 +219,9 @@ class RandAugmentMC(object):
     def __call__(self, img):
         ops = random.choices(self.augment_pool, k=self.n)
         for op, max_v, bias in ops:
+            # 生成落在[1,m]范围内的随机数，作为random magnitude
             v = np.random.randint(1, self.m)
+            # 以1/2几率应用这个op
             if random.random() < 0.5:
                 img = op(img, v=v, max_v=max_v, bias=bias)
         img = CutoutAbs(img, 16)

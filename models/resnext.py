@@ -6,12 +6,12 @@ import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
-
+# mish激活函数，用于取代relu
 def mish(x):
     """Mish: A Self Regularized Non-Monotonic Neural Activation Function (https://arxiv.org/abs/1908.08681)"""
     return x * torch.tanh(F.softplus(x))
 
-
+# post-shifted BN，实际提升效果不到1%
 class PSBatchNorm2d(nn.BatchNorm2d):
     """How Does BN Increase Collapsed Neural Network Filters? (https://arxiv.org/abs/2001.11216)"""
 
@@ -20,6 +20,7 @@ class PSBatchNorm2d(nn.BatchNorm2d):
         self.alpha = alpha
 
     def forward(self, x):
+        # 论文提出的解决方案就是在原始的BN再加上一个alpha，实验中取alpha=0.1
         return super().forward(x) + self.alpha
 
 
@@ -102,13 +103,17 @@ class CifarResNeXt(nn.Module):
         self.output_size = 64
         self.stages = [64, 64 * self.widen_factor, 128 *
                        self.widen_factor, 256 * self.widen_factor]
-
+        
+        # 第一层是一个3*3的卷积层
         self.conv_1_3x3 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
+        # 接着是一个BN层
         self.bn_1 = PSBatchNorm2d(64, momentum=0.001)
+        # 定义激活函数
         self.act = mish
         self.stage_1 = self.block('stage_1', self.stages[0], self.stages[1], 1)
         self.stage_2 = self.block('stage_2', self.stages[1], self.stages[2], 2)
         self.stage_3 = self.block('stage_3', self.stages[2], self.stages[3], 2)
+        # 全连接层
         self.classifier = nn.Linear(self.stages[3], num_classes)
 
         for m in self.modules():
@@ -159,6 +164,7 @@ class CifarResNeXt(nn.Module):
         x = self.stage_2.forward(x)
         x = self.stage_3.forward(x)
         x = F.adaptive_avg_pool2d(x, 1)
+        # reshape
         x = x.view(-1, self.stages[3])
         return self.classifier(x)
 

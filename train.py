@@ -138,6 +138,7 @@ def main():
 
         return model
 
+    # 本地训练
     if args.local_rank == -1:
         device = torch.device('cuda', args.gpu_id)
         args.world_size = 1
@@ -153,6 +154,7 @@ def main():
 
     if args.dataset == 'cifar10':
         args.num_classes = 10
+        # WRN-28-2
         if args.arch == 'wideresnet':
             args.model_depth = 28
             args.model_width = 2
@@ -163,6 +165,7 @@ def main():
 
     elif args.dataset == 'cifar100':
         args.num_classes = 100
+        # WRN-28-10，参数量太大，WRN-28-2的训练速度会快很多
         if args.arch == 'wideresnet':
             args.model_depth = 28
             args.model_width = 10
@@ -230,8 +233,10 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=args.lr,
                           momentum=0.9, nesterov=args.nesterov)
 
+    # 单个epoch训练的图片数量是args.k_img，除以batch_size得到迭代次数
     args.iteration = args.k_img // args.batch_size // args.world_size
     args.total_steps = args.epochs * args.iteration
+    # 默认的warmup epoch是0
     scheduler = get_cosine_schedule_with_warmup(
         optimizer, args.warmup * args.iteration, args.total_steps)
 
@@ -348,13 +353,17 @@ def train(args, labeled_trainloader, unlabeled_trainloader,
 
     train_loader = zip(labeled_trainloader, unlabeled_trainloader)
     model.train()
+    # batch index, labeled data, unlabeled data
     for batch_idx, (data_x, data_u) in enumerate(train_loader):
+        # labeled images, label
         inputs_x, targets_x = data_x
+        # weak/strong augmented unlabeled images 
         (inputs_u_w, inputs_u_s), _ = data_u
         data_time.update(time.time() - end)
         batch_size = inputs_x.shape[0]
         inputs = torch.cat((inputs_x, inputs_u_w, inputs_u_s)).to(args.device)
         targets_x = targets_x.to(args.device)
+        # forward
         logits = model(inputs)
         logits_x = logits[:batch_size]
         logits_u_w, logits_u_s = logits[batch_size:].chunk(2)
@@ -363,7 +372,9 @@ def train(args, labeled_trainloader, unlabeled_trainloader,
         Lx = F.cross_entropy(logits_x, targets_x, reduction='mean')
 
         pseudo_label = torch.softmax(logits_u_w.detach_(), dim=-1)
+        # one-hot
         max_probs, targets_u = torch.max(pseudo_label, dim=-1)
+        # get mask
         mask = max_probs.ge(args.threshold).float()
 
         Lu = (F.cross_entropy(logits_u_s, targets_u,

@@ -19,11 +19,14 @@ normal_std = (0.5, 0.5, 0.5)
 
 def get_cifar10(root, num_labeled, num_expand_x, num_expand_u):
     transform_labeled = transforms.Compose([
+        # 对输入图像以1/2几率进行水平翻转，对应fixmatch中的augment_mirror
         transforms.RandomHorizontalFlip(),
+        # 对输入图像做random crop，对应fixmatch中的augment_shift
         transforms.RandomCrop(size=32,
                               padding=int(32*0.125),
                               padding_mode='reflect'),
         transforms.ToTensor(),
+        # 归一化
         transforms.Normalize(mean=cifar10_mean, std=cifar10_std)
     ])
     transform_val = transforms.Compose([
@@ -37,11 +40,11 @@ def get_cifar10(root, num_labeled, num_expand_x, num_expand_u):
 
     train_labeled_dataset = CIFAR10SSL(
         root, train_labeled_idxs, train=True,
-        transform=transform_labeled)
+        transform=transform_labeled) # 对labeled data只进行weak augment
 
     train_unlabeled_dataset = CIFAR10SSL(
         root, train_unlabeled_idxs, train=True,
-        transform=TransformFix(mean=cifar10_mean, std=cifar10_std))
+        transform=TransformFix(mean=cifar10_mean, std=cifar10_std)) # 对unlabeled data进行weak augment + strong augment
 
     test_dataset = datasets.CIFAR10(
         root, train=False, transform=transform_val, download=False)
@@ -89,7 +92,7 @@ def get_cifar100(root, num_labeled, num_expand_x, num_expand_u):
 
     return train_labeled_dataset, train_unlabeled_dataset, test_dataset
 
-
+# 划分labeled和unlabeled data
 def x_u_split(labels,
               num_labeled,
               num_expand_x,
@@ -101,17 +104,21 @@ def x_u_split(labels,
     unlabeled_idx = []
     for i in range(num_classes):
         idx = np.where(labels == i)[0]
+        # 打乱idx的顺序
         np.random.shuffle(idx)
         labeled_idx.extend(idx[:label_per_class])
         unlabeled_idx.extend(idx[label_per_class:])
 
+    # 将labeled data的数量扩张到num_expand_x，首先计算至少需要重复多少次
     exapand_labeled = num_expand_x // len(labeled_idx)
     exapand_unlabeled = num_expand_u // len(unlabeled_idx)
+    # 进行重复填充，将labeled_idx重复exapand_labeled次
     labeled_idx = np.hstack(
         [labeled_idx for _ in range(exapand_labeled)])
     unlabeled_idx = np.hstack(
         [unlabeled_idx for _ in range(exapand_unlabeled)])
 
+    # 在labeled_idx中随机选取，补充缺少的部分
     if len(labeled_idx) < num_expand_x:
         diff = num_expand_x - len(labeled_idx)
         labeled_idx = np.hstack(
@@ -166,9 +173,11 @@ class CIFAR10SSL(datasets.CIFAR10):
 
     def __getitem__(self, index):
         img, target = self.data[index], self.targets[index]
+        # 转化为PIL image
         img = Image.fromarray(img)
 
         if self.transform is not None:
+            # 对PIL image应用已定义的transform，进行数据增强和归一化等操作
             img = self.transform(img)
 
         if self.target_transform is not None:

@@ -24,6 +24,7 @@ class PSBatchNorm2d(nn.BatchNorm2d):
 
 
 class BasicBlock(nn.Module):
+    """Consist of two 3*3*filters conv layers"""
     def __init__(self, in_planes, out_planes, stride, drop_rate=0.0, activate_before_residual=False):
         super(BasicBlock, self).__init__()
         self.bn1 = PSBatchNorm2d(in_planes, momentum=0.001)
@@ -35,7 +36,9 @@ class BasicBlock(nn.Module):
         self.conv2 = nn.Conv2d(out_planes, out_planes, kernel_size=3, stride=1,
                                padding=1, bias=False)
         self.drop_rate = drop_rate
+        # 检查block的输入和最终输出的维度是否一致，如果不一致，不能直接相加
         self.equalInOut = (in_planes == out_planes)
+        # 输入输出的维度不一致，需要添加一个1*1的卷积层，让输入变换到输出的维度，再相加
         self.convShortcut = (not self.equalInOut) and nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride,
                                                                 padding=0, bias=False) or None
         self.activate_before_residual = activate_before_residual
@@ -46,13 +49,16 @@ class BasicBlock(nn.Module):
         else:
             out = self.relu1(self.bn1(x))
         out = self.relu2(self.bn2(self.conv1(out if self.equalInOut else x)))
+        # 在两个卷积层之间加入dropout
         if self.drop_rate > 0:
             out = F.dropout(out, p=self.drop_rate, training=self.training)
         out = self.conv2(out)
+        # 最后将初始输入与卷积层的输出相加
         return torch.add(x if self.equalInOut else self.convShortcut(x), out)
 
 
 class NetworkBlock(nn.Module):
+    """Consist of (two 3*3*filters conv layers) * nb_layers"""
     def __init__(self, nb_layers, in_planes, out_planes, block, stride, drop_rate=0.0, activate_before_residual=False):
         super(NetworkBlock, self).__init__()
         self.layer = self._make_layer(
@@ -70,13 +76,16 @@ class NetworkBlock(nn.Module):
 
 
 class WideResNet(nn.Module):
+    """Wide Residual Networks (https://arxiv.org/pdf/1605.07146.pdf)"""
+
     def __init__(self, num_classes, depth=28, widen_factor=2, drop_rate=0.0):
         super(WideResNet, self).__init__()
         channels = [16, 16*widen_factor, 32*widen_factor, 64*widen_factor]
         assert((depth - 4) % 6 == 0)
+        # n: number of blocks in group
         n = (depth - 4) / 6
         block = BasicBlock
-        # 1st conv before any network block
+        # 1st conv before any network block, a 3*3 conv layer
         self.conv1 = nn.Conv2d(3, channels[0], kernel_size=3, stride=1,
                                padding=1, bias=False)
         # 1st block
